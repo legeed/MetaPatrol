@@ -218,7 +218,7 @@ void initScrolling(){
   bloc[0].x = 0;
   bloc[0].y = 52;
   bloc[0].type = BONUS;
-  for (byte i=1 ; i <= NUM_BLOCS ; i++) {
+  for (byte i=1 ; i < NUM_BLOCS ; i++) {
   bloc[i].w = 8;
   bloc[i].h = 8;
   bloc[i].type = NORMAL;
@@ -273,7 +273,7 @@ if(gb.buttons.pressed(BUTTON_A)) {player.shoot = true;} else {player.shoot = fal
 //    Mise à jour du sol, des fonds et du ciel
 // ---------------------------------------------------------------------------
 void updateScrolling(){
-   for (byte i=0; i<=5;i++) {            //réinitialisation des scrolling des fonds
+   for (byte i=0; i<5;i++) {            //réinitialisation des scrolling des fonds
     if (Xback[i] <= -240) {Xback[i]=0;}
    }
    //Etoiles (gamespeed 0)
@@ -284,7 +284,7 @@ void updateScrolling(){
    if( timecount % gamespeed[2] == 0) {Xback[2] --;}
    //Sol (gamespeed 4)
    if( timecount % gamespeed[4] == 0) {            
-   for (byte t=0;t<=NUM_BLOCS;t++) {
+   for (byte t=0;t<NUM_BLOCS;t++) {
     bloc[t].x --;
     if (bloc[t].x < -bloc[t].w) {bloc[t].x = gb.display.width()-1;}
     }
@@ -324,7 +324,7 @@ void drawHitbox() {
   gb.display.setColor(PINK);
   gb.display.drawRect(player.x,player.y,12,8);
   //Ground Blocs
-  for (byte p=0 ; p <= NUM_BLOCS ; p++){
+  for (byte p=0 ; p < NUM_BLOCS ; p++){
     gb.display.setColor(bloc[p].type);
     gb.display.drawRect(bloc[p].x,bloc[p].y,bloc[p].w,bloc[p].h);  
   }
