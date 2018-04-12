@@ -200,15 +200,15 @@ void initGame(){
 //    Initialisation du joueur
 // ---------------------------------------------------------------------------
 void initPlayer(){
-  player.w = 12;
-  player.h = 8; 
+  player.w = 4;
+  player.h = 4; 
   player.x = 0;
   player.xv = 0;
-  player.y = 52;
+  player.y = 54;
   player.yv = 0;
   player.mode = NORMAL;
   player.state = NORMAL;
-  player.life = 3;
+  player.life = 100;
   player.frame = 0;
   player.anim = false;
 }
@@ -228,16 +228,17 @@ void initScrolling(){
   bloc[0].w = 8;
   bloc[0].h = 8;
   bloc[0].x = 0;
-  bloc[0].y = 52;
-  bloc[0].type = BONUS;
+  bloc[0].y = 50;
+  bloc[0].type = NORMAL;
   for (byte i=1 ; i < NUM_BLOCS ; i++) {
-  bloc[i].w = 8;
-  bloc[i].h = 8;
-  bloc[i].type = NORMAL;
-  bloc[i].y = 52;
+  bloc[i].w =  bloc[0].w;
+  bloc[i].h = bloc[0].h;
+  bloc[i].type = bloc[0].type;
+  bloc[i].y = bloc[0].y;
   bloc[i].x = bloc[i-1].x + bloc[i-1].w;
   }
   //testing blocks
+  bloc[0].type = BONUS;
   bloc[5].type = ROCK;
   bloc[7].type = HOLE;
   bloc[9].type = BONUS;
@@ -258,26 +259,27 @@ void updateGame(){
 // ---------------------------------------------------------------------------
 void updatePlayer(){
 //  Mouvement - les valeurs ont été définies de manière empirique
-if (player.y < 52){
-  player.mode = JUMP;
-  player.yv += 0.5;
-  player.yv *= 0.75;
-  } else {
-  player.mode = NORMAL;
-  player.yv = 0;}
-player.xv = 0;
-if(gb.buttons.repeat(BUTTON_RIGHT, 1) && player.mode != JUMP){
-  player.xv += 2;}              //à droite
-if(gb.buttons.repeat(BUTTON_LEFT,1) && player.mode != JUMP){
-  player.xv -= 2;}              //à gauche
-player.x = min(max(0,player.x + player.xv),40); //borne la coordonnée X entre 0 et 40px
-if(gb.buttons.pressed(BUTTON_B) && player.mode != JUMP) {//Saut
-  player.mode = JUMP;
-  player.yv -= 4;
-  player.y -= 1;
-} 
-player.y = min(max(8, player.y + player.yv),52); //gravité, bornée à 52px
-if(gb.buttons.pressed(BUTTON_A)) {player.shoot = true;} else {player.shoot = false;} //tir
+  if (player.y < 54){
+   player.mode = JUMP;
+   player.yv += 0.5;
+   player.yv *= 0.75;
+   } else {
+   player.mode = NORMAL;
+   player.yv = 0;}
+  player.xv = 0;
+  if(gb.buttons.repeat(BUTTON_RIGHT, 1) && player.mode != JUMP){
+   player.xv += 2;}              //à droite
+  if(gb.buttons.repeat(BUTTON_LEFT,1) && player.mode != JUMP){
+    player.xv -= 2;}              //à gauche
+  player.x = min(max(0,player.x + player.xv),gb.display.width()-12); //borne la coordonnée X
+  if(gb.buttons.pressed(BUTTON_B) && player.mode != JUMP) {                     //Saut
+  //if(gb.buttons.timeHeld(BUTTON_B) > 0 & gb.buttons.timeHeld(BUTTON_B) < 5 ){ //test saut à la "flappy-bird"
+   player.mode = JUMP;
+   player.yv -= 4;
+   player.y -= 1;
+  } 
+  player.y = min(max(8, player.y + player.yv),54); //gravité, bornée à 53px
+  if(gb.buttons.pressed(BUTTON_A)) {player.shoot = true;} else {player.shoot = false;} //tir
 }
 // ---------------------------------------------------------------------------
 
@@ -293,9 +295,9 @@ void updateScrolling(){
    //Montagnes grises (gamespeed 1)
    if( timecount % gamespeed[1] == 0) {Xback[1] --;}
    //Montagnes vertes (gamespeed 2)
-   if( timecount % gamespeed[2] == 0) {Xback[2] --;}
+   if( timecount % gamespeed[3] == 0) {Xback[2] --;}
    //Sol (gamespeed 4)
-   if( timecount % gamespeed[4] == 0) {            
+   if( timecount % gamespeed[5] == 0) {            
    for (byte t=0;t<NUM_BLOCS;t++) {
     bloc[t].x --;
     if (bloc[t].x < -bloc[t].w) {bloc[t].x = gb.display.width()-1;}
@@ -329,16 +331,37 @@ void drawScene() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-//    drawHitbox - Dessine les hitboxd
+//    drawInterface - Interface
+// ---------------------------------------------------------------------------
+void drawInterface() {
+  
+}
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+//    drawHitbox - Dessine les hitbox
 // ---------------------------------------------------------------------------
 void drawHitbox() {
   //Player
   gb.display.setColor(PINK);
-  gb.display.drawRect(player.x,player.y,12,8);
+  gb.display.fillRect(player.x+3,player.y,player.w,player.h);
   //Ground Blocs
   for (byte p=0 ; p < NUM_BLOCS ; p++){
     gb.display.setColor(bloc[p].type);
-    gb.display.drawRect(bloc[p].x,bloc[p].y,bloc[p].w,bloc[p].h);  
+    switch (bloc[p].type) {
+     case NORMAL:
+      //gb.display.drawRect(bloc[p].x,bloc[p].y,bloc[p].w,bloc[p].h);
+      break;
+     case ROCK:
+      gb.display.drawRect(bloc[p].x,bloc[p].y+2,bloc[p].w,bloc[p].h-2);
+      break;
+     case HOLE:
+      gb.display.drawRect(bloc[p].x+1,bloc[p].y,bloc[p].w-2,bloc[p].h);
+      break;  
+     case BONUS:
+      gb.display.drawRect(bloc[p].x+2,bloc[p].y+4,bloc[p].w-4,bloc[p].h-4);
+      break; 
+    }
   }
   //Variables
   gb.display.setColor(WHITE);
@@ -365,10 +388,10 @@ void drawHitbox() {
 void drawPlayer() {
   switch (player.mode) {
     case NORMAL:
-      gb.display.drawImage(player.x, player.y,img_rover);
+      gb.display.drawImage(player.x, player.y-player.h,img_rover);
       break;
     case JUMP:
-      gb.display.drawImage(player.x, player.y,img_rover);
+      gb.display.drawImage(player.x, player.y-player.h,img_rover);
       break;  
   }
   if (player.shoot) {
@@ -392,10 +415,24 @@ void drawSky() {
 //    drawGround - Dessine le sol
 // ---------------------------------------------------------------------------
 void drawGround() {
+  for (byte p=0 ; p < NUM_BLOCS ; p++){
+    switch (bloc[p].type) {
+     case NORMAL:
+      gb.display.drawImage(bloc[p].x, bloc[p].y, img_ground);
+      break;
+     case ROCK:
+      gb.display.drawImage(bloc[p].x, bloc[p].y, img_rock);
+      break;
+     case HOLE:
+      gb.display.drawImage(bloc[p].x, bloc[p].y, img_hole);
+      break;  
+     case BONUS:
+      gb.display.drawImage(bloc[p].x, bloc[p].y, img_bonus);
+      break; 
+    }
+  }
   gb.display.setColor(BROWN);
-  gb.display.fillRect(0,60,gb.display.width(),4);
-  gb.display.setColor(DARKGRAY);
-  gb.display.drawFastHLine(0,59,gb.display.width());
+  gb.display.fillRect(0,62,gb.display.width(),2);
 }
 // ---------------------------------------------------------------------------
 
