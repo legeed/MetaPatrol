@@ -43,7 +43,14 @@ int timecount;
 byte gamespeed[5] = {8,6,3,2,1};    //Attention à la taille du tableau !
 int Xback[4];
 int timer_bloc_regen;
-int time_regen = 75;                //temps entre régénération de blocs "obstacles"
+byte cooldown_regen = 75;                //temps entre régénération de blocs "obstacles", tirs, etc.
+int timer_shoot_player;
+byte cooldown_shoot_player = 25;
+int timer_shoot_UFO;
+byte cooldown_shoot_UFO = 12;
+boolean flag_regen_power;
+int timer_regen_power;
+byte cooldown_regen_power = 50;
 
 //boites fixes (sol, montagnes ...)
 typedef struct {
@@ -78,9 +85,9 @@ Box bloc[NUM_BLOCS];
 #define NUM_UFOS 10                     //UFO
 MovingBox ufo[NUM_UFOS];
 #define NUM_PSHOOTS 100                //Tirs du joueur
-MovingBox p_shoot[NUM_PBULLETS];
+MovingBox p_shoot[NUM_PSHOOTS];
 #define NUM_UFOSHOOTS 100              //Tirs des UFO
-MovingBox ufo_shoot[NUM_UFOBULLETS];
+MovingBox ufo_shoot[NUM_UFOSHOOTS];
 
 MovingBox player;                       //création de  l'objet qui représente le joueur 
 
@@ -90,19 +97,21 @@ MovingBox player;                       //création de  l'objet qui représente 
 
 //Etat possible du joueur ou d'un ennemi
 #define NORMAL 0
-#define HIT 1
-#define FUZZY 2
+#define BLOCKED 1
+#define HIT 2
 #define DEAD 3
 #define EXPLODE 4
 #define INVINCIBILITY 5
 #define INACTIVE 10    // for bullets/shoots
 #define ACTIVE 11     //
+#define BOOM 12
 
 //Types possibles d'un bloc de sol
-#define NORMAL 0  
-#define HOLE 1    
-#define ROCK 2    
-#define BONUS 3  
+#define NORMAL 0
+#define BONUS 1
+#define HOLE 10    
+#define ROCK 11    
+ 
 
 // FIN DES VARIABLES #########################################################
 // ###########################################################################
@@ -163,6 +172,7 @@ switch( gamemode ) {
   case GAME:
     updateGame();
     updateScrolling();
+    updateShoots();
     updatePlayer();
     drawScene();
     break;
@@ -198,10 +208,13 @@ switch( gamemode ) {
 // ---------------------------------------------------------------------------
 void initGame(){
   timecount = 0;
-  time_regen = 50;
+  cooldown_regen = 50;
   timer_bloc_regen = 0;
+  timer_regen_power = 0;
   for (byte i=0; i < NUM_PSHOOTS; i++) {
     p_shoot[i].state = INACTIVE;
+    p_shoot[i].w = 3;
+    p_shoot[i].h = 3;
   }
 }
 //---------------------------------------------------------------------------
@@ -285,24 +298,54 @@ void updatePlayer(){
    player.yv -= 4.5;
    player.y -= 1;
   } 
-  player.y = min(max(8, player.y + player.yv),54); //gravité, bornée à 53px
+  player.y = min(max(8, player.y + player.yv),54); //gravité, bornée à 54px
 //Tir
-  if(gb.buttons.pressed(BUTTON_A)) {
-    player.shoot = true;
-    
-    
-    
+  timer_shoot_player ++;
+  if(gb.buttons.repeat(BUTTON_A,1) && timer_shoot_player >= cooldown_shoot_player) {   //cooldown ok et appui sur A
+    for (byte i=0; i<NUM_PSHOOTS;i++) {       //cherche une balle "dispo" dans le tableau pour le tir horizontal
+      if(p_shoot[i].state == INACTIVE) {      //si une de dispo, alors je la génère et sort de la boucle avec break
+          p_shoot[i].state = ACTIVE;
+          player.shoot = true;
+          player.power --;
+          timer_shoot_player = 0;
+          p_shoot[i].x = player.x;
+          p_shoot[i].y = player.y;
+          p_shoot[i].xv = 3;
+          p_shoot[i].yv = 0;
+          p_shoot[i].frame = 5;
+          break;
+          }
+     }
+     for (byte i=0; i<NUM_PSHOOTS;i++) {       //cherche une balle "dispo" dans le tableau pour le tir vertical
+      if(p_shoot[i].state == INACTIVE) {      //si une de dispo, alors je la génère et sort de la boucle avec break
+          p_shoot[i].state = ACTIVE;
+          player.shoot = true;
+          player.power --;
+          timer_shoot_player = 0;
+          p_shoot[i].x = player.x+1;
+          p_shoot[i].y = player.y;
+          p_shoot[i].xv = 0;
+          p_shoot[i].yv = 3;
+          p_shoot[i].frame = 5;
+          break;
+          }
+     }
     } else {player.shoot = false;}
 //Collisions avec un bloc
   for (byte p=0; p < NUM_BLOCS ; p++) {
     switch (bloc[p].type) {
      case ROCK:
       if(gb.collideRectRect(player.x, player.y, player.w, player.h,bloc[p].x,bloc[p].y+2,bloc[p].w,bloc[p].h-3)) {
-        player.state = HIT;}
+        player.state = BLOCKED;
+        player.y = min(max(8, player.y - player.yv),54);
+        if(player.y > 52) {player.x = min(max(0,player.x - player.xv - 1),gb.display.width()-12);}
+        }
       break;
      case HOLE:
-      if(player.y >= 54 && gb.collideRectRect(player.x, player.y, player.w, player.h,bloc[p].x+1,bloc[p].y,bloc[p].w-2,bloc[p].h)) {
-        player.state = HIT;}
+      if(player.y >= 54 && gb.collideRectRect(player.x, player.y, player.w, player.h,bloc[p].x,bloc[p].y,bloc[p].w,bloc[p].h)) {
+        player.state = BLOCKED;
+        player.x = min(max(0,player.x - player.xv - 1),gb.display.width()-12);
+        }
       break;  
      case BONUS:
       if(gb.collideRectRect(player.x, player.y, player.w+4, player.h,bloc[p].x+2,bloc[p].y+4,bloc[p].w-4,bloc[p].h-4)) {
@@ -311,8 +354,20 @@ void updatePlayer(){
       break;
     }
   }
+//Blocage sur bord gauche
+  if (player.x <= 0 && player.state == BLOCKED){player.state = HIT;}
 //Effet d'une touche
-  if(player.state == HIT) {player.power = max(player.power - 17,0);}
+  if(player.state == HIT) {player.power -= 50;}
+//Regénération de power
+  if(player.state == NORMAL) {timer_regen_power ++;} else {timer_regen_power = 0;}
+  if(player.shoot) {timer_regen_power = 0;}
+  if(timer_regen_power >= cooldown_regen_power) {flag_regen_power = true;} else {flag_regen_power = false;}
+  if(flag_regen_power) {player.power = min(player.power + 1,255);}
+//Perte d'une vie
+  if (player.power < 0) {
+    player.life --;
+    player.state = DEAD;
+  }
 }
 // ---------------------------------------------------------------------------
 
@@ -330,19 +385,43 @@ void updateScrolling(){
    //Montagnes vertes (gamespeed 2)
    if( timecount % gamespeed[3] == 0) {Xback[2] --;}
    //Sol (gamespeed 4)
-   if( timecount % gamespeed[4] == 0) {            
    for (byte t=0;t<NUM_BLOCS;t++) {
     bloc[t].x --;
-    if (bloc[t].x < -bloc[t].w) {
+    if (bloc[t].x < -bloc[t].w) {             //régénération d'un obstacle
       bloc[t].x = gb.display.width()-1;
-      if(timer_bloc_regen >= time_regen) {
-        bloc[t].type = random(1,4);
+      bloc[t].type = NORMAL;
+      if(timer_bloc_regen >= cooldown_regen) {    //modification du type en fonction du timer
+        bloc[t].type = random(10,12);
         timer_bloc_regen = 0;
-        } else {
-          bloc[t].type = NORMAL; }
+      }
+     }
+    }
+}
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+//    Mise à jour des tirs
+// ---------------------------------------------------------------------------
+void updateShoots(){
+  for (byte i=0; i<NUM_PSHOOTS;i++) {   //balayage des tirs du joueur
+    if(p_shoot[i].state == BOOM) {      //timer pour les animations d'explosions des balles qu'ont fait BOOM
+      p_shoot[i].frame --;
+      if(p_shoot[i].frame == 0) {p_shoot[i].state = INACTIVE;} //l'animation du BOOM est terminée
+      }
+    if(p_shoot[i].state == ACTIVE) {    //uniquement les balles "actives"
+      p_shoot[i].x += p_shoot[i].xv;
+      p_shoot[i].y -= p_shoot[i].yv;
+    if (p_shoot[i].x > gb.display.width() || p_shoot[i].y < 0) {p_shoot[i].state = INACTIVE;} //la balle est sortie de l'écran
+    for (byte p=0; p < NUM_BLOCS ; p++) {
+        if(gb.collideRectRect(p_shoot[i].x, p_shoot[i].y, p_shoot[i].w, p_shoot[i].h,bloc[p].x,bloc[p].y+2,bloc[p].w,bloc[p].h-3) && bloc[p].type == ROCK) {
+          bloc[p].type = NORMAL;
+          p_shoot[i].xv = -1;
+          p_shoot[i].yv = 0;
+          p_shoot[i].state = BOOM;
+        }
       }
     }
-   }
+  }
 }
 // ---------------------------------------------------------------------------
 
@@ -364,8 +443,8 @@ void drawScene() {
   drawGreenMountain();
   drawGround();
   drawUFOS();
-  drawPlayer();
   drawBullets();
+  drawPlayer();
   //drawHitbox();
   drawInterface();
 }
@@ -382,50 +461,10 @@ void drawInterface() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-//    drawHitbox - Dessine les hitbox
+//    drawHitbox - Dessine les hitbox et autres trucs utiles
 // ---------------------------------------------------------------------------
 void drawHitbox() {
-  /*
-  //Player
-  gb.display.setColor(PINK);
-  gb.display.fillRect(player.x+3,player.y,player.w,player.h);
-  //Ground Blocs
-  for (byte p=0 ; p < NUM_BLOCS ; p++){
-    gb.display.setColor(bloc[p].type);
-    switch (bloc[p].type) {
-     case NORMAL:
-      //gb.display.drawRect(bloc[p].x,bloc[p].y,bloc[p].w,bloc[p].h);
-      break;
-     case ROCK:
-      gb.display.drawRect(bloc[p].x,bloc[p].y+2,bloc[p].w,bloc[p].h-2);
-      break;
-     case HOLE:
-      gb.display.drawRect(bloc[p].x+1,bloc[p].y,bloc[p].w-2,bloc[p].h);
-      break;  
-     case BONUS:
-      gb.display.drawRect(bloc[p].x+2,bloc[p].y+4,bloc[p].w-4,bloc[p].h-4);
-      break; 
-    }
-  }
-  */
-  //Variables
-  gb.display.setColor(WHITE);
-  gb.display.print("timecount : ");
-  gb.display.println(timecount);
-  gb.display.print("time_regen : ");
-  gb.display.println(time_regen/25);  
-  //gb.display.print("bloc[0].x : ");
-  //gb.display.println(bloc[0].x);
-  //gb.display.print("bloc[0].y : ");
-  //gb.display.println(bloc[0].y);
-  //gb.display.print("player.x : ");
-  //gb.display.println(player.x);
-  //gb.display.print("player.y : ");
-  //gb.display.println(player.y);
-  //gb.display.print("player.xv : ");
-  //gb.display.println(player.xv);
-  //gb.display.print("player.yv : ");
-  //gb.display.println(player.yv);
+  
 }
 // ---------------------------------------------------------------------------
 
@@ -435,15 +474,15 @@ void drawHitbox() {
 void drawPlayer() {
   switch (player.mode) {
     case NORMAL:
-      gb.display.drawImage(player.x, player.y-player.h,img_rover);
+      gb.display.drawImage(player.x, player.y-player.h+1,img_rover);
       break;
     case JUMP:
-      gb.display.drawImage(player.x, player.y-player.h,img_rover);
+      gb.display.drawImage(player.x, player.y-player.h+1,img_rover);
       break;  
   }
   if (player.shoot) {
-    gb.display.drawPixel(player.x+11,player.y,YELLOW);
-    gb.display.drawPixel(player.x+2,player.y-3,YELLOW);
+    gb.display.drawPixel(player.x+11,player.y+1,YELLOW);
+    gb.display.drawPixel(player.x+2,player.y-2,YELLOW);
   }
 }
 // ---------------------------------------------------------------------------
@@ -512,7 +551,20 @@ void drawUFOS() {
 //    drawBullets() - Dessine les tirs
 // ---------------------------------------------------------------------------
 void drawBullets() {
+  for (byte i=0; i<NUM_PSHOOTS;i++) {
+   if(p_shoot[i].state == ACTIVE) {
+      gb.display.setColor(PINK);
+      gb.display.fillRect(p_shoot[i].x,p_shoot[i].y,p_shoot[i].w,p_shoot[i].h);
+      gb.display.drawPixel(p_shoot[i].x+1,p_shoot[i].y+1,YELLOW);
+   }
+   if(p_shoot[i].state == BOOM) {
+     gb.display.setColor(RED);
+     gb.display.fillRect(p_shoot[i].x-1,p_shoot[i].y-1,p_shoot[i].w+2,p_shoot[i].h+2);
+    }
+  }
 }
+
+
 // ---------------------------------------------------------------------------
 // FIN DES FONCTIONS DE DESSIN ###############################################
 // ###########################################################################
