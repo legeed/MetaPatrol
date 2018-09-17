@@ -4,8 +4,8 @@
 //         Title : MetaPatrol.ino
 //         Author: Jean-Baptiste Chaffange Koch
 //    Description: A moonpatrol-like game for Gamebuino Meta.
-//        Version: 0
-//           Date: 29 Mar 2018
+//        Version: 0bis
+//           Date: 14 Sep 2018
 //        License: GPLv3 (see LICENSE)
 //
 //    MetaPatrol Copyright (C) 2018 Jean-Baptiste Chaffange Koch
@@ -13,6 +13,11 @@
 //    it under the terms of the GNU General Public License as published by
 //    the Free Software Foundation, either version 3 of the License, or
 //    any later version.
+//    
+//    It's a modification of CosmicPods for Arduboy created by cubic9com 
+//    <https://twitter.com/cubic9com>
+//    <https://github.com/ArduboyCollection/CosmicPods<
+//    Thanks to him !
 //
 //    
 //###########################################################################
@@ -22,543 +27,727 @@
 //    VARIABLES
 // ###########################################################################
 
-
-
 #include <Gamebuino-Meta.h>
-#include "bitmaps.h"
-#include "worlds.h"
 
-//mode du jeu
-#define GAME 0
-#define MENU 1 
-#define PAUSE 2
-#define GAMEOVER 3
-byte gamemode = MENU;    //mode du jeu
+#define X_MAX 64
+#define Y_MAX 80
 
-//variables diverses du jeu
-boolean testvar;
-byte xmin,xmax,ymin,ymax; 
-int timecount;
-byte gamespeed[7] = {0,1,2,4,8,16,32};    //Attention à la taille du tableau !
+#define NUM_PLAYER_BULLETS 4
+#define MAX_NUM_ENEMIES 4
+#define MAX_NUM_OBSTACLES 2
+#define NUM_STARS 32
 
-//boites fixes
-typedef struct {
-  byte w;           //largeur
-  float x;          //pos X
-  byte h;           //hauteur
-  float y;          //pos Y
-  byte type;        //type
-  byte frame;       //compteur de frame pour l'animation
-  boolean flag;        //flag animation
-} Box;
+#define OBSTACLE_RECT {0, 0, 10, 10}
+#define ENEMY_RECT {0, 0, 10, 10}
+#define PLAYER_RECT {0, 1, 10, 10}
+uint8_t STAR_COLORS [] = {1, 6, 7, 12, 13};
 
-//boites mouvantes (joueur, obstacles, tirs, UFO, etc.)
-typedef struct {
-  byte w;           //largeur
-  float x;          //pos X
-  float xv;         //vitesse X
-  byte h;           //hauteur
-  float y;          //pos Y
-  float yv;         //vitesse Y
-  byte mode;        //mode
-  boolean shoot;    //tire ?
-  byte state;       //etat
-  byte life;        //vies
-  byte power;       //power
-  byte frame;       //compteur de frame pour l'animation
-  boolean anim;     //flag animation
-} MovingBox;
+struct Rect {
+  int16_t x;      
+  int16_t y;      
+  uint8_t w;      
+  uint8_t h;      
+};
 
-#define NUM_OBSTACLES 10               //Ennemis = obstacles à la progression du joueur
-Box obstacle[NUM_OBSTACLES];
-#define NUM_PSHOOTS 50                //Tirs du joueur
-MovingBox p_shoot[NUM_PSHOOTS];
-#define NUM_ESHOOTS 50                //Tirs des Ennemis
-MovingBox e_shoot[NUM_ESHOOTS];
+struct Point {
+  int16_t x;      
+  int16_t y;      
+};
 
-MovingBox player;                       //création de  l'objet qui représente le joueur 
+struct Speed {
+  int16_t dx;      
+  int16_t dy; 
+};
 
-//Etat possible du joueur ou d'un ennemi ou d'un tir
-#define NORMAL 0
-#define HIT 1
-#define DEAD 2
-#define INACTIVE 10        // Tirs
-#define ACTIVE 11          
-#define EXPLOSION 12       // Explosion
+struct Vector2 {
+  float x;
+  float y;
+};
 
-//Modes du Joueur
-#define NORMAL 0
-#define CROUCH 1
-#define JUMP 2 
+struct FloatPoint {
+  float x;
+  float y;
+};
 
-//Types possibles d'un obstacle
-#define INACTIVE 0
-#define ROCK 1
-#define MAN 2    
-#define TANK 3
-#define FLYER 4
+struct PlayerBullet {
+  Point point;
+  Speed spd;
+  boolean enabled;
+};
 
-//Types possibles d'une tile
-#define EMPTY 0            //aucun effet
-#define WALL 1         //bloque le joueur
-#define BLOC 2        // = Bloc mais destructible avec un tir
-#define WATER 3 
+struct Player {
+  Rect rect;
+  byte power;
+  PlayerBullet bullets[NUM_PLAYER_BULLETS];
+};
 
-byte world_buffer_w = 30;
-byte world_buffer_h = 8;
-byte tile_w = 8;
-byte tile_h = 8;
-int world_camera_x = 0;       //position de la caméra en x (à droite de l'écran)
+struct EnemyBullet {
+  FloatPoint point;
+  Vector2 delta;
+  boolean enabled;
+};
+
+struct Enemy {
+  Rect rect;
+  EnemyBullet bullet;
+  Speed spd;
+  byte type;
+};
+
+struct Obstacle {
+  Rect rect;
+  byte type;
+  byte state;
+};
+
+struct Star {
+  Point point;
+  byte spd;
+  byte color;
+};
+
+struct Player player;
+struct Star stars[NUM_STARS];
+struct Enemy enemies[MAX_NUM_ENEMIES];
+struct Obstacle obstacles[MAX_NUM_OBSTACLES];
+
+boolean is_gameover;
+boolean is_title;
+unsigned int score;
+unsigned int best_score;
+boolean is_highscore;
+byte num_enemies;
+byte num_obstacles;
+byte bullet_speed_factor;
+byte level;
+byte WIDTH;
+byte HEIGHT;
+byte ymin = 40;
 
 // FIN DES VARIABLES #########################################################
 // ###########################################################################
+
+
+
+// ###########################################################################
+//    BITMAPS & SOUNDS
+// ###########################################################################
+
+const Gamebuino_Meta::Sound_FX sfx_shoot[] = {
+  {Gamebuino_Meta::Sound_FX_Wave::SQUARE,0,255,-15,25,24,8},
+};
+
+const Gamebuino_Meta::Sound_FX sfx_explosion[] = {
+  {Gamebuino_Meta::Sound_FX_Wave::SQUARE,1,180,25,35,100,2},
+  {Gamebuino_Meta::Sound_FX_Wave::NOISE,1,200,0,19,112,9},
+  {Gamebuino_Meta::Sound_FX_Wave::NOISE,0,90,0,20,0,16},
+};
+
+const Gamebuino_Meta::Sound_FX sfx_blop[] = {
+  {Gamebuino_Meta::Sound_FX_Wave::SQUARE,0,255,30,30,100,13},
+};
+
+// FIN DES BITMAPS & SOUNDS ##################################################
+// ###########################################################################
+
 
 
 // ###########################################################################
 //    SETUP
 // ###########################################################################
 void setup() {
-gb.begin();
-#define DISPLAY_MODE DISPLAY_MODE_INDEX
+    gb.begin();
+    //gb.display.init(160, 128, ColorMode::index);
+
+    best_score = gb.save.get(0);
+
+    WIDTH = gb.display.width();
+    HEIGHT = gb.display.height();
+
+    for (byte i = 0; i < MAX_NUM_ENEMIES; i++) {
+      enemies[i].rect = ENEMY_RECT;
+    }
+
+    for (byte i = 0; i < MAX_NUM_OBSTACLES; i++) {
+      obstacles[i].rect = OBSTACLE_RECT;
+      obstacles[i].state = 0;
+    }
+  
+    player.rect = PLAYER_RECT;
+    player.power = 255;
+  
+    beginGame();
 }
 // FIN DU BEGIN ##############################################################
 // ###########################################################################
+
 
 
 // ###########################################################################
 //    LOOP
 // ###########################################################################
 void loop() {
-while(!gb.update());
-gb.display.clear();
-switch( gamemode ) {
-  case GAME:
-    updateGame();
-    updateScrolling();
-    updateShoots();
-    updatePlayer();
-    drawScene();
-    break;
-  case MENU:
-    initGame();
-    initPlayer();
-    initScrolling();
-    gamemode = GAME;
-    break;
-  case PAUSE:
-    /*drawScene();
-    drawInterface;
-    drawObstacle();
+    
+    while(!gb.update());
+    
+    gb.display.clear();
+    gb.lights.clear();
+
+     if (is_title) {
+      moveStars();
+      drawStars();
+      displayTitle();
+      if (gb.buttons.pressed(BUTTON_A) || gb.buttons.pressed(BUTTON_B)) {
+        beginGame();
+        is_title = false;
+      }
+       return;
+     }
+  
+    if (is_gameover) {
+       displayGameover();
+       if (gb.buttons.pressed(BUTTON_A) || gb.buttons.pressed(BUTTON_B)) {
+       beginGame();
+       }
+      return;
+    }
+
+    movePlayer();
+    moveStars();
+    moveEnemies();
+    moveObstacles();
+    movePlayerBullets();
+    moveEnemiesBullet();
+
+    drawScore();
+    drawStars();
     drawPlayer();
-    drawPause();*/
-    break;
-  case GAMEOVER:
-    /*drawGameover();*/
-    break;  
+    drawEnemies();
+    drawObstacles();
+    drawPlayerBullets();
+    drawEnemiesBullet();
+
+    checkEnemyCollision();
+    checkObstaclesCollision();
+    checkPlayerCollision();
+  
 }
-}
+
 // FIN DU LOOP ###############################################################
 // ###########################################################################
 
 
 
 // ###########################################################################
-//    FONCTIONS DE CALCUL
+//    FONCTIONS
 // ###########################################################################
 
-// ---------------------------------------------------------------------------
-//    Initialisation du jeu
-// ---------------------------------------------------------------------------
-void initGame(){
-  timecount = 0;
-  world_camera_x = 0;
-  for (byte i=0; i < NUM_PSHOOTS; i++) {
-    p_shoot[i].state = INACTIVE;
-    p_shoot[i].w = 4;
-    p_shoot[i].h = 4;
-  }
-}
-//---------------------------------------------------------------------------
+void beginGame() {
+  
+  score = 0;
 
-// ---------------------------------------------------------------------------
-//    Initialisation du joueur
-// ---------------------------------------------------------------------------
-void initPlayer(){
-  player.w = 16;
-  player.h = 16; 
-  player.x = 0;
-  player.xv = 0;
-  player.y = 0;
-  player.yv = 0;
-  player.mode = NORMAL;
-  player.state = NORMAL;
-  player.life = 255;
+  player.rect.x = 0;
+  player.rect.y = 40;
   player.power = 255;
-  player.frame = 0;
-  player.anim = false;
+
+  for (byte i = 0; i < NUM_STARS; i++) {
+    spawnStar(i);
+  }
+
+  for (byte i = 0; i < MAX_NUM_ENEMIES; i++) {
+    spawnEnemy(i);
+  }
+
+  for (byte i = 0; i < MAX_NUM_OBSTACLES; i++) {
+    spawnObstacles(i);
+  }
+
+  for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+    player.bullets[i].enabled = false;
+    player.bullets[i].point.x = 0;
+    player.bullets[i].point.y = 0;
+    player.bullets[i].spd.dx = 0;
+    player.bullets[i].spd.dy = 0;
+  }
+
+  for (byte i = 0; i < MAX_NUM_ENEMIES; i++) {
+    enemies[i].bullet.enabled = false;
+    enemies[i].bullet.point.x = 0;
+    enemies[i].bullet.point.y = 0;
+  }
+
+  is_gameover = false;
+  is_title = true;
+  is_highscore = false;
+
+  shiftLevel();
 }
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-//    Initialisation du scrolling (sol, étoiles, fonds, etc.)
-// ---------------------------------------------------------------------------
-void initScrolling(){
-  //Background 0
 
-  //Background 1
 
-  //Background 2
+void shiftLevel() {
+  switch (score) {
+    case 0:
+      setLevel(1, 1, 1, 1.4);
+      break;
+    case 1:
+      setLevel(2, 1, 1, 1.4);
+      break;
+    case 3:
+      setLevel(3, 2, 1, 1.4);
+      break;
+    case 7:
+      setLevel(4, 2, 1, 1.5);
+      break;
+    case 16:
+      setLevel(5, 2, 2,  1.6);
+      break;
+    case 25:
+      setLevel(6, 2, 2,  1.8);
+      break;
+    case 37:
+      setLevel(7, 2, 2,  2.0);
+      break;
+    case 49:
+      setLevel(8, 2, 2,  2.3);
+      break;
+    case 64:
+      setLevel(9, 2, 2,  2.4);
+      break;
+    case 79:
+      setLevel(10, 2, 2,  2.6);
+      break;
+    case 97:
+      setLevel(11, 3, 2,  2.8);
+      break;
+    case 115:
+      setLevel(12, 3, 2,  3.1);
+      break;
+    case 136:
+      setLevel(13, 3, 2,  3.4);
+      break;
+    case 157:
+      setLevel(14, MAX_NUM_ENEMIES, MAX_NUM_OBSTACLES,  3.7);
+      break;
+    case 181:
+      setLevel(15, MAX_NUM_ENEMIES, MAX_NUM_OBSTACLES,  4.1);
+      break;
+    default:
+      break;
+  }
+}
 
-  //Sol
+
+void setLevel(byte lv, byte ne, byte no, float spd) {
+  level = lv;
+  num_enemies = ne;
+  num_obstacles = no;
+  bullet_speed_factor = spd;
+}
+
+void spawnEnemy(byte i) {
+  enemies[i].rect.x = 0 ;
+  enemies[i].rect.y = 0 ;
+  enemies[i].type = random(1,3);
+  switch (enemies[i].type) {
+    case 1:
+      enemies[i].spd.dx = -random(1,3);
+      break;
+    case 2:
+      enemies[i].spd.dx = -random(2,4);
+      break;
+  }
+  enemies[i].spd.dy = 0;
+}
+
+void spawnObstacles(byte i) {
+  obstacles[i].state = 1; //O : inactive , 1 : active
+  obstacles[i].rect.x = WIDTH;
+  obstacles[i].type = random(1,3);  //0 : Rock & 1 : Hole
+  switch (obstacles[i].type ) {
+    case 1:   //ROCK
+      obstacles[i].rect.y = ymin + obstacles[i].rect.h - 1 ;
+      break;
+    case 2:   //HOLE
+      obstacles[i].rect.y = ymin;
+      break;   
+  }
+}
+
+void spawnStar(byte i) {
+  stars[i].point.x = random(WIDTH, WIDTH * 2);
+  stars[i].point.y = random(0, HEIGHT);
+  stars[i].spd = random(1, 5);
+  stars[i].color = STAR_COLORS[random(0,4)];
+}
+
+void spawnPlayerBullet(byte i, byte dir) {
+  player.bullets[i].enabled = true;
+  player.bullets[i].point.x = player.rect.x+5;
+  player.bullets[i].point.y = player.rect.y+5;
+  switch (dir) {
+    case 0:
+      player.bullets[i].spd.dx = 0;
+      player.bullets[i].spd.dy = 2;
+      break;
+    case 1:
+      player.bullets[i].spd.dx = 2;
+      player.bullets[i].spd.dy = 0;
+      break;
+    }
+}
+
+void spawnEnemyBullet(byte i) {
+  enemies[i].bullet.enabled = true;
+  enemies[i].bullet.point.x = enemies[i].rect.x+5;
+  enemies[i].bullet.point.y = enemies[i].rect.y+5;
+
+  Vector2 orig_delta;
+  orig_delta.x = player.rect.x - enemies[i].rect.x;
+  orig_delta.y = player.rect.y - enemies[i].rect.y;
+
+  Vector2 new_delta = calcDelta(orig_delta);
+
+  enemies[i].bullet.delta.x = new_delta.x;
+  enemies[i].bullet.delta.y = new_delta.y;
+}
+
+Vector2 calcDelta(Vector2 v) {
+  float mag = bullet_speed_factor / sqrt(v.x * v.x + v.y * v.y);
+
+  Vector2 v2;
+  v2.x = v.x * mag;
+  v2.y = v.y * mag;
+
+  return v2;
+}
+
+void movePlayer() {
+
+  player.power = min(player.power + 1 , 255);
   
-}
-// ---------------------------------------------------------------------------
+  if (gb.buttons.repeat(BUTTON_RIGHT,1) && (player.rect.x < 70)) {
+    player.rect.x++;
+  }
 
-// ---------------------------------------------------------------------------
-//    Mise à jour du jeu
-// ---------------------------------------------------------------------------
-void updateGame(){
-  timecount++;
-}
-// ---------------------------------------------------------------------------
+  if (gb.buttons.repeat(BUTTON_LEFT,1) && (player.rect.x > 0)) {
+    player.rect.x--;
+  }
 
-// ---------------------------------------------------------------------------
-//    Détermine la tileID sous les coordonnées données
-// ---------------------------------------------------------------------------
-byte getTileID(byte x, byte y){             //détermine le ID (pour le graphisme)
-  return world_buffer[x + (y * world_buffer_w)]; 
-}
-// ---------------------------------------------------------------------------
+  if (gb.buttons.repeat(BUTTON_UP,1) && (player.rect.y > 0) && player.power > 0) {
+    player.rect.y--;
+    player.power = max(player.power - 10 , 0);
+  } else {player.rect.y = min(ymin, player.rect.y + 1) ;}
 
-// ---------------------------------------------------------------------------
-//    Détermine la tileID sous les coordonnées données
-// ---------------------------------------------------------------------------
-boolean playerCollision(){             //détermine si le joueur entre en collision avec un BLOC ou WALL
-  
- for (byte x = xmin; x <= xmax; x++) {    
-    if (getTileID(x,ymax) == BLOC || getTileID(x,ymax) == WALL) {  
-      return true;
+  if (gb.buttons.repeat(BUTTON_DOWN,1) && (player.rect.y < ymin)) {
+    player.rect.y++;
+  }
+
+  if (gb.buttons.repeat(BUTTON_A,12)) {
+    for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+      if (!player.bullets[i].enabled) {
+        spawnPlayerBullet(i,0);
+        gb.sound.fx(sfx_shoot);
+        break;
       }
-  }
- 
- for (byte x = xmin; x <= xmax; x++) {    
-    if (getTileID(x,ymin) == BLOC || getTileID(x,ymin) == WALL) {  
-      return true;
-      }
-  }
-  
- for(byte y = ymin; y <= ymax; y++) {
-    if (getTileID(xmax,y) == WALL || getTileID(xmax,y) == BLOC) {
-        return true;
-        }  
-    }
- for(byte y = ymin; y <= ymax; y++) {
-    if (getTileID(xmin,y) == WALL || getTileID(xmin,y) == BLOC) {
-        return true;
-        }  
-    }
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    Mise à jour du joueur - position, score, vies, etc.
-// ---------------------------------------------------------------------------
-void updatePlayer(){
-  //Mouvement - les valeurs ont été définies de manière empirique
-  player.mode = NORMAL;
-  player.xv *= 0.55;      //gravité et friction
-  player.yv += 0.5;
-  player.yv *= 0.55;  
-  
-  if(gb.buttons.repeat(BUTTON_RIGHT, 1)){
-    player.xv += 1;}              //à droite
-  if(gb.buttons.repeat(BUTTON_LEFT,1)){
-    player.xv -= 1;}              //à gauche
-  if(gb.buttons.repeat(BUTTON_B,9)){   //jetpack
-    player.yv -= 5;
-  }
-  if(gb.buttons.pressed(BUTTON_DOWN)){    //accroupi
-    player.h = 8;
-    player.y += 8;
-    player.mode = CROUCH;
-  }
-  if(!gb.buttons.timeHeld(BUTTON_DOWN)){ //se relève
-    if(player.h ==8){
-      player.h = 16;
-      player.y -= 8; 
-      /*if(playerCollision()){
-        player.h = 8;
-        player.y += 8;
-        player.mode = CROUCH;
-      }*/
-    }
-  }
-  
-  player.y = max(0,min(gb.display.height()-player.h,player.y + player.yv));
-  player.x = max(0,min(gb.display.width()-player.w,player.x + player.xv));
-
-  //détermine les tiles impactées par le joueur
-  xmin = (min((player.x)/tile_w,world_buffer_w));
-  xmax = (min((player.x+player.w-1)/tile_w,world_buffer_w));
-  ymin = (min(player.y/tile_h,world_buffer_h));
-  ymax = (min((player.y+player.h-1)/tile_h,world_buffer_h));
-
-  testvar = false;
-  testvar = playerCollision();
-  /*if (playerCollision()){
-    player.y -= player.yv;
-    player.x -= player.xv;
-  }*/
-
- 
-//Tir
-  
-  if(gb.buttons.repeat(BUTTON_A,5)) {   
-    for (byte i=0; i<NUM_PSHOOTS;i++) {       //cherche une balle "dispo" dans le tableau pour le tir horizontal
-      if(p_shoot[i].state == INACTIVE) {      //si une de dispo, alors je la génère et sort de la boucle avec break
-          p_shoot[i].state = ACTIVE;
-          player.shoot = true;
-          player.power --;
-          p_shoot[i].x = player.x;
-          p_shoot[i].y = player.y;
-          p_shoot[i].xv = 5;
-          p_shoot[i].yv = 0;
-          p_shoot[i].frame = 5;
-          break;
-          }
      }
-     /*for (byte i=0; i<NUM_PSHOOTS;i++) {       //cherche une balle "dispo" dans le tableau pour le tir vertical
-      if(p_shoot[i].state == INACTIVE) {      //si une de dispo, alors je la génère et sort de la boucle avec break
-          p_shoot[i].state = ACTIVE;
-          player.shoot = true;
-          player.power --;
-          timer_shoot_player = 0;
-          p_shoot[i].x = player.x;
-          p_shoot[i].y = player.y;
-          p_shoot[i].xv = 0;
-          p_shoot[i].yv = 5;
-          p_shoot[i].frame = 5;
+  }
+
+  if (gb.buttons.repeat(BUTTON_B,24)) {
+    for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+      if (!player.bullets[i].enabled) {
+        spawnPlayerBullet(i,1);
+        gb.sound.fx(sfx_shoot);
+        break;
+      }
+     }
+  }
+     
+}
+
+void moveStars() {
+  for (byte i = 0; i < NUM_STARS; i++) {
+    stars[i].point.x -= stars[i].spd;
+    if (stars[i].point.x < 0) {
+      spawnStar(i);
+    }
+  }
+}
+
+void moveEnemies() {
+  for (byte i = 0; i < num_enemies; i++) {
+    
+    enemies[i].rect.x =  enemies[i].rect.x - enemies[i].spd.dx;
+
+    if (
+      (level > 2)
+      && (enemies[i].rect.x > player.rect.x + 10)
+      && (enemies[i].rect.x < WIDTH - 10)
+      && (!enemies[i].bullet.enabled)
+      && (random(0, 50) == 10)
+    ) {
+      spawnEnemyBullet(i);
+      gb.sound.fx(sfx_blop);
+    }
+
+    if (enemies[i].rect.x < 1 || enemies[i].rect.x >= (WIDTH - enemies[i].rect.w)) {
+      enemies[i].spd.dx = -enemies[i].spd.dx;
+    }
+  }
+}
+
+void moveObstacles() {
+  for (byte i = 0; i < num_obstacles; i++) {
+    obstacles[i].rect.x--;
+    if (obstacles[i].rect.x <= 0) {
+      spawnObstacles(i);
+    }
+  }
+}
+
+void movePlayerBullets() {
+  for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+    if (player.bullets[i].enabled) {
+      player.bullets[i].point.x += player.bullets[i].spd.dx;
+      player.bullets[i].point.y -= player.bullets[i].spd.dy;
+      if (player.bullets[i].point.x > WIDTH || player.bullets[i].point.y < 0) {
+        player.bullets[i].enabled = false;
+      }
+    }
+  }
+}
+
+void moveEnemiesBullet() {
+  for (byte i = 0; i < num_enemies; i++) {
+    if (enemies[i].bullet.enabled) {
+      enemies[i].bullet.point.x += enemies[i].bullet.delta.x;
+      enemies[i].bullet.point.y += enemies[i].bullet.delta.y;
+      if (
+        (enemies[i].bullet.point.x <= 0)
+        || (enemies[i].bullet.point.y <= 0)
+        || (enemies[i].bullet.point.y >= HEIGHT)
+      ) {
+        enemies[i].bullet.enabled = false;
+      }
+    }
+  }
+}
+
+boolean collidePointRect(Point test_point, Rect test_rect){
+  if ( (test_point.x < test_rect.x) || (test_point.x > (test_rect.x + test_rect.w - 1)) || (test_point.y < test_rect.y) || (test_point.y > (test_rect.y + test_rect.h -1)) ) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+boolean collideRectRect(Rect test_rect_A, Rect test_rect_B){
+     if((test_rect_B.x >= test_rect_A.x + test_rect_A.w)
+        || (test_rect_B.x + test_rect_B.w <= test_rect_A.x) 
+        || (test_rect_B.y >= test_rect_A.y + test_rect_A.h)
+        || (test_rect_B.y + test_rect_B.h <= test_rect_A.y)) {
+          return false; 
+        } else {
+          return true; 
+        }
+}
+
+void checkEnemyCollision() {
+  for (byte j = 0; j < num_enemies; j++) {
+    boolean is_col = false;
+    for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+      if (player.bullets[i].enabled) {
+        is_col = collidePointRect(player.bullets[i].point, enemies[j].rect);
+        if (is_col) {
+          player.bullets[i].enabled = false;
           break;
-          }
-     }*/
-    } else {player.shoot = false;}
-
-//Blocage sur bord gauche
-  
-//Application des effets d'une touche
-
-//Regénération de power
-
-//Perte d'une vie
-
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    Mise à jour du sol, des fonds et du ciel
-// ---------------------------------------------------------------------------
-void updateScrolling(){
-  //Background 0
-
-  //Background 1
-
-  //Background 2
-
-  //Sol
-  //if (timecount % gamespeed[1] == 0) {camera_x++;}
- }
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    Mise à jour des tirs
-// ---------------------------------------------------------------------------
-void updateShoots(){
-  for (byte i=0; i<NUM_PSHOOTS;i++) {   //balayage des tirs du joueur et et vérification s'ils rencontrent un obstacle (ennemi ou equivalent)
-    if(p_shoot[i].state == EXPLOSION) {      //timer pour les animations d'explosions des balles qu'ont fait BOOM
-        p_shoot[i].frame --;
-        if(p_shoot[i].frame == 0) {p_shoot[i].state = INACTIVE;} //l'animation du BOOM est terminée
-        continue;           // la balle suivante est scrutée, celle-ci ne provoquera rien
-      }
-    if(p_shoot[i].state == ACTIVE) {    //uniquement les balles "actives" sont déplacées
-      p_shoot[i].x += p_shoot[i].xv;
-      p_shoot[i].y -= p_shoot[i].yv;
-    if (p_shoot[i].x < 0 || p_shoot[i].y < 0 || p_shoot[i].y > gb.display.height() || p_shoot[i].x > gb.display.width() ) {
-      p_shoot[i].state = INACTIVE;
-      continue;}          //la balle est sortie de l'écran, la balle suivante est scrutée
-    for (byte p=0; p < NUM_OBSTACLES ; p++) {     //collisions pour les tirs du joueur
-        if(gb.collideRectRect(p_shoot[i].x, p_shoot[i].y, p_shoot[i].w, p_shoot[i].h,obstacle[p].x,obstacle[p].y,obstacle[p].w,obstacle[p].h)) {
-          obstacle[p].type = INACTIVE;
-          p_shoot[i].xv = -1;
-          p_shoot[i].yv = 0;
-          p_shoot[i].state = EXPLOSION;
-        }
-      }
-    } else {continue;}
-  }
-  for (byte i=0; i < NUM_ESHOOTS ; i++) {     //collisions pour les tirs des ennemis, balayage des tirs et vérification s'ils rencontrent le joueur
-    if(e_shoot[i].state == EXPLOSION) {      //timer pour les animations d'explosions des balles qu'ont fait BOOM
-        e_shoot[i].frame --;
-        if(e_shoot[i].frame == 0) {e_shoot[i].state = INACTIVE;} //l'animation du BOOM est terminée
-        continue;           // la balle suivante est scrutée, celle-ci ne provoquera rien 
-      }
-    if(e_shoot[i].state == ACTIVE) {    //uniquement les balles "actives" sont déplacées
-      e_shoot[i].x += e_shoot[i].xv;
-      e_shoot[i].y -= e_shoot[i].yv;
-    if (e_shoot[i].x < 0 || e_shoot[i].y < 0 || e_shoot[i].y > gb.display.height() || e_shoot[i].x > gb.display.width() ) {
-      e_shoot[i].state = INACTIVE;
-      continue;}                    //la balle est sortie de l'écran, la balle suivante est scrutée
-    for (byte p=0; p < NUM_OBSTACLES ; p++) {     //collisions pour les tirs du joueur
-        if(gb.collideRectRect(e_shoot[i].x, e_shoot[i].y, e_shoot[i].w, e_shoot[i].h,obstacle[p].x,obstacle[p].y,obstacle[p].w,obstacle[p].h)) {
-          obstacle[p].type = INACTIVE;
-          p_shoot[i].xv = 0;
-          p_shoot[i].yv = 0;
-          p_shoot[i].state = EXPLOSION;
         }
       }
     }
+    if (is_col) {
+      score++;
+      shiftLevel();
+      spawnEnemy(j);
+    }
   }
 }
-// ---------------------------------------------------------------------------
 
-// FIN DES FONCTIONS DE CALCUL ###############################################
-// ###########################################################################
-
-
-
-// ###########################################################################
-//    FONCTIONS DE DESSIN
-// ###########################################################################
-
-// ---------------------------------------------------------------------------
-//    drawScene - Assemble les éléments de jeu pour l'affichage
-// ---------------------------------------------------------------------------
-void drawScene() {
-  drawSky();
-  drawGreyMountain();
-  drawGreenMountain();
-  drawGround();
-  drawUFOS();
-  drawBullets();
-  drawPlayer();
-  //drawHitbox();
-  drawInterface();
+void checkObstaclesCollision() {
+    for (byte j = 0; j < num_obstacles; j++) {
+    if (obstacles[j].state == 0) { continue;}
+    boolean is_col = false;
+    for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+      if (player.bullets[i].enabled) {
+        is_col = collidePointRect(player.bullets[i].point, obstacles[j].rect);
+        if (is_col) {
+          player.bullets[i].enabled = false;
+          break;
+        }
+      }
+    }
+    if (is_col) {
+      score++;
+      shiftLevel();
+      obstacles[j].state = 0;
+    }
+  }
 }
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-//    drawInterface - Interface
-// ---------------------------------------------------------------------------
-void drawInterface() {
+void checkPlayerCollision() {
+  for (byte i = 0; i < num_enemies; i++) {
+    Point tmp_point;
+    tmp_point.x = enemies[i].bullet.point.x;
+    tmp_point.y = enemies[i].bullet.point.y;
+    boolean is_enemy_col = collideRectRect(enemies[i].rect, player.rect);
+    boolean is_bullet_col = (enemies[i].bullet.enabled) && (collidePointRect(tmp_point, player.rect));
+    if ((is_enemy_col) || (is_bullet_col)) {
+      if (score > best_score) { 
+        gb.save.set(0, score);
+        best_score = score;
+        is_highscore = true;
+        } else {
+          is_highscore = false;
+        }
+      displayGameover();
+      return;
+    }
+  }
+  for (byte i = 0; i < num_obstacles; i++) {
+    if (obstacles[i].state == 0) { continue;}
+    boolean is_obstacle_col = collideRectRect(obstacles[i].rect, player.rect);
+    if (is_obstacle_col) {
+      if (score > best_score) { 
+        gb.save.set(0, score);
+        best_score = score;
+        is_highscore = true;
+        } else {
+          is_highscore = false;
+        }
+      displayGameover();
+      return;
+    }
+  }
+
+
+  
+}
+
+void displayGameover() {
+  for (byte i = 0; i <= 3; i++) {
+    gb.lights.drawPixel(0, i, RED);
+    gb.lights.drawPixel(1, i, RED);
+  }
+  drawScore();
   gb.display.setColor(WHITE);
-  uint16_t ram = gb.getFreeRam();
-  gb.display.setCursor(1, 1);
-  gb.display.print("RAM:");
-  gb.display.println(ram);
-  uint8_t load = gb.getCpuLoad();
-  gb.display.setCursor(1, 10);
-  gb.display.print("CPU:");
-  gb.display.print(load);
-  gb.display.println("%");
-  gb.display.setCursor(1, 20);
-  gb.display.print("player : ");
-  gb.display.print(xmin);
-  gb.display.print(xmax);
-  gb.display.print(ymin);
-  gb.display.print(ymax);
-  gb.display.setCursor(1, 30);
-  gb.display.print("coll : ");
-  gb.display.print(testvar);
-  
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawHitbox - Dessine les hitbox et autres trucs utiles
-// ---------------------------------------------------------------------------
-void drawHitbox() {
-  
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawPlayer - Dessine le joueur
-// ---------------------------------------------------------------------------
-void drawPlayer() {
-  gb.display.setColor(PINK);
-  gb.display.drawRect(player.x, player .y, player.w, player.h);  
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawSky - Dessine le ciel
-// ---------------------------------------------------------------------------
-void drawSky() {
-  
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawGround - Dessine le sol
-// ---------------------------------------------------------------------------
-void drawGround() {
-  for (int i = 0; i < world_buffer_w; i++) {
-    for (int j = 0; j < world_buffer_h; j++) {
-      int tileID = world_buffer[i + (j * world_buffer_w)];
-      int x_screen = i*tile_w - world_camera_x;
-      if (tiletype[tileID] == EMPTY){continue;}
-      if  (x_screen < -tile_w || x_screen > gb.display.width() ) {continue;}
-      img_tilemap.setFrame(tileID);
-      gb.display.drawImage(x_screen, j*tile_h, img_tilemap);
-    }
-   }
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawGreyMountain - Dessine les montagnes 1 (grises)
-// ---------------------------------------------------------------------------
-void drawGreyMountain(){
-
-}  
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawGreenMountain - Dessine les montagnes 2 (vertes)
-// ---------------------------------------------------------------------------
-void drawGreenMountain() {
-
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawUFO - Dessine les UFO
-// ---------------------------------------------------------------------------
-void drawUFOS() {
-}
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-//    drawBullets() - Dessine les tirs
-// ---------------------------------------------------------------------------
-void drawBullets() {
-  for (byte i=0; i<NUM_PSHOOTS;i++) {
-   if(p_shoot[i].state == ACTIVE) {
-      gb.display.setColor(LIGHTGREEN);
-      gb.display.fillRect(p_shoot[i].x,p_shoot[i].y,p_shoot[i].w,p_shoot[i].h);
-   }
-   if(p_shoot[i].state == EXPLOSION) {
+  gb.display.setCursor(20,20);
+  gb.display.print("GAME OVER");
+  if (is_highscore) {
      gb.display.setColor(RED);
-     gb.display.fillRect(p_shoot[i].x,p_shoot[i].y,p_shoot[i].w,p_shoot[i].h);
+     gb.display.setCursor(12,30);
+     gb.display.print("NEW HIGH SCORE");
+  }
+  is_gameover = true;
+}
+
+void displayTitle() {
+  gb.display.setColor(WHITE);
+  gb.display.setCursor(20,20);
+  gb.display.println("Meta Patrol");
+  gb.display.println("                  ");
+  gb.display.print("   Highscore : ");
+  gb.display.println(best_score);
+}
+
+void drawScore() {
+ gb.display.setColor(GRAY);
+ gb.display.setCursor(1, HEIGHT - 6);
+ gb.display.print("SCORE:");
+ gb.display.setCursor(30, HEIGHT - 6);
+ gb.display.print(score);
+ gb.display.setColor(YELLOW);
+ gb.display.setCursor(65, HEIGHT - 6);
+ gb.display.print(player.power);
+}
+
+void drawPlayer() {
+  byte x = player.rect.x;
+  byte y = player.rect.y;
+  byte w = player.rect.w;
+  byte h = player.rect.h;
+  gb.display.setColor(WHITE); 
+  gb.display.drawRect(x, y, w, h);
+}
+
+void drawStars() {
+  for (byte i = 0; i < NUM_STARS; i++) {
+    byte x = stars[i].point.x;
+    byte y = stars[i].point.y;
+    gb.display.setColor(stars[i].color);
+    gb.display.drawPixel(x, y);
+  }
+}
+
+void drawEnemies() {
+  for (byte i = 0; i < num_enemies; i++) {
+    byte x = enemies[i].rect.x;
+    byte y = enemies[i].rect.y;
+    byte w = enemies[i].rect.w;
+    byte h = enemies[i].rect.h;
+    switch (enemies[i].type) {
+      case 1:
+        gb.display.setColor(RED);
+        gb.display.drawRect(x, y, w, h);
+        break;
+      case 2:
+        gb.display.setColor(BLUE);
+        gb.display.drawRect(x, y, w, h);
+        break;
     }
   }
 }
 
+void drawObstacles() {
+  for (byte i = 0; i < num_obstacles; i++) {
+    if (obstacles[i].state == 0) { continue;}
+    byte x = obstacles[i].rect.x;
+    byte y = obstacles[i].rect.y;
+    byte w = obstacles[i].rect.w;
+    byte h = obstacles[i].rect.h;
+    switch (obstacles[i].type) {
+      case 1:
+        gb.display.setColor(WHITE);
+        gb.display.drawRect(x, y, w, h);
+        break;
+      case 2:
+        gb.display.setColor(GRAY);
+        gb.display.drawRect(x, y, w, h);
+        break;
+    }
+  }
+}
 
-// ---------------------------------------------------------------------------
-// FIN DES FONCTIONS DE DESSIN ###############################################
+void drawPlayerBullets() {
+  for (byte i = 0; i < NUM_PLAYER_BULLETS; i++) {
+    if (player.bullets[i].enabled) {
+      byte x = player.bullets[i].point.x;
+      byte y = player.bullets[i].point.y;
+      gb.display.drawPixel(x, y, ORANGE);
+    }
+  }
+}
+
+void drawEnemiesBullet() {
+  byte i;
+  int x, y;
+
+  for (i = 0; i < num_enemies; i++) {
+    if (enemies[i].bullet.enabled) {
+      x = enemies[i].bullet.point.x;
+      y = enemies[i].bullet.point.y;
+      gb.display.drawPixel(x, y, PINK);
+     }
+  }
+}
+
+// FIN DES FONCTIONS##########################################################
 // ###########################################################################
-
-
-
-
-
