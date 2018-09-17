@@ -106,6 +106,10 @@ struct Star {
   byte color;
 };
 
+struct Camera {
+  Speed spd;
+};
+
 struct Player player;
 struct Star stars[NUM_STARS];
 struct Enemy enemies[MAX_NUM_ENEMIES];
@@ -123,6 +127,10 @@ byte level;
 byte WIDTH;
 byte HEIGHT;
 byte ymin = 40;
+struct Camera camera;
+const int XMap[80] = {0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4};
+const int YMap[50] = {3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0};
+
 
 // FIN DES VARIABLES #########################################################
 // ###########################################################################
@@ -157,7 +165,6 @@ const Gamebuino_Meta::Sound_FX sfx_blop[] = {
 // ###########################################################################
 void setup() {
     gb.begin();
-    //gb.display.init(160, 128, ColorMode::index);
 
     best_score = gb.save.get(0);
 
@@ -174,7 +181,7 @@ void setup() {
     }
   
     player.rect = PLAYER_RECT;
-    player.power = 255;
+    player.power = 25;
   
     beginGame();
 }
@@ -218,14 +225,17 @@ void loop() {
     moveObstacles();
     movePlayerBullets();
     moveEnemiesBullet();
-
-    drawScore();
+    
     drawStars();
+    drawScene();
+    
     drawPlayer();
     drawEnemies();
     drawObstacles();
     drawPlayerBullets();
     drawEnemiesBullet();
+
+    drawScore();
 
     checkEnemyCollision();
     checkObstaclesCollision();
@@ -248,7 +258,7 @@ void beginGame() {
 
   player.rect.x = 0;
   player.rect.y = 40;
-  player.power = 255;
+  player.power = 25;
 
   for (byte i = 0; i < NUM_STARS; i++) {
     spawnStar(i);
@@ -346,14 +356,15 @@ void setLevel(byte lv, byte ne, byte no, float spd) {
 }
 
 void spawnEnemy(byte i) {
-  enemies[i].rect.x = 0 ;
   enemies[i].rect.y = 0 ;
   enemies[i].type = random(1,3);
   switch (enemies[i].type) {
     case 1:
+      enemies[i].rect.x = 0 ;
       enemies[i].spd.dx = -random(1,3);
       break;
     case 2:
+      enemies[i].rect.x = 0 ;
       enemies[i].spd.dx = -random(2,4);
       break;
   }
@@ -363,15 +374,18 @@ void spawnEnemy(byte i) {
 void spawnObstacles(byte i) {
   obstacles[i].state = 1; //O : inactive , 1 : active
   obstacles[i].rect.x = WIDTH;
-  obstacles[i].type = random(1,3);  //0 : Rock & 1 : Hole
+  obstacles[i].type = random(1,4);
   switch (obstacles[i].type ) {
-    case 1:   //ROCK
+    case 1:   //HOLE
       obstacles[i].rect.y = ymin + obstacles[i].rect.h - 1 ;
       break;
-    case 2:   //HOLE
+    case 2:   //ROCK
       obstacles[i].rect.y = ymin;
       break;   
-  }
+    case 3:   //BONUS
+      obstacles[i].rect.y = ymin;
+      break;
+   }
 }
 
 void spawnStar(byte i) {
@@ -424,7 +438,7 @@ Vector2 calcDelta(Vector2 v) {
 
 void movePlayer() {
 
-  player.power = min(player.power + 1 , 255);
+  //player.power = min(player.power + 1 , 25);
   
   if (gb.buttons.repeat(BUTTON_RIGHT,1) && (player.rect.x < 70)) {
     player.rect.x++;
@@ -436,7 +450,7 @@ void movePlayer() {
 
   if (gb.buttons.repeat(BUTTON_UP,1) && (player.rect.y > 0) && player.power > 0) {
     player.rect.y--;
-    player.power = max(player.power - 10 , 0);
+    player.power = max(player.power - 1 , 0);
   } else {player.rect.y = min(ymin, player.rect.y + 1) ;}
 
   if (gb.buttons.repeat(BUTTON_DOWN,1) && (player.rect.y < ymin)) {
@@ -462,7 +476,9 @@ void movePlayer() {
       }
      }
   }
-     
+
+   setupCamera(player.rect.x, player.rect.y);
+    
 }
 
 void moveStars() {
@@ -565,6 +581,7 @@ void checkEnemyCollision() {
       }
     }
     if (is_col) {
+      player.power = min(player.power + 1, 25);
       score++;
       shiftLevel();
       spawnEnemy(j);
@@ -586,6 +603,7 @@ void checkObstaclesCollision() {
       }
     }
     if (is_col) {
+      player.power = min(player.power + 1, 25);
       score++;
       shiftLevel();
       obstacles[j].state = 0;
@@ -616,6 +634,13 @@ void checkPlayerCollision() {
     if (obstacles[i].state == 0) { continue;}
     boolean is_obstacle_col = collideRectRect(obstacles[i].rect, player.rect);
     if (is_obstacle_col) {
+      if (obstacles[i].type == 3) {
+        player.power = 25;
+        score++;
+        shiftLevel();
+        obstacles[i].state = 0;      
+        continue;
+      }
       if (score > best_score) { 
         gb.save.set(0, score);
         best_score = score;
@@ -659,14 +684,18 @@ void displayTitle() {
 }
 
 void drawScore() {
+ gb.display.setColor(BLACK);
+ gb.display.fillRect(0,57,80,64); 
  gb.display.setColor(GRAY);
  gb.display.setCursor(1, HEIGHT - 6);
  gb.display.print("SCORE:");
  gb.display.setCursor(30, HEIGHT - 6);
  gb.display.print(score);
  gb.display.setColor(YELLOW);
- gb.display.setCursor(65, HEIGHT - 6);
- gb.display.print(player.power);
+ gb.display.fillRect(54,58,player.power,5);
+ gb.display.setColor(BLACK);
+ gb.display.setCursor(55, HEIGHT - 6);
+ gb.display.print("POW");
 }
 
 void drawPlayer() {
@@ -714,12 +743,16 @@ void drawObstacles() {
     byte w = obstacles[i].rect.w;
     byte h = obstacles[i].rect.h;
     switch (obstacles[i].type) {
-      case 1:
+      case 1: //HOLE
         gb.display.setColor(WHITE);
         gb.display.drawRect(x, y, w, h);
         break;
-      case 2:
+      case 2: //ROCK
         gb.display.setColor(GRAY);
+        gb.display.drawRect(x, y, w, h);
+        break;
+      case 3: //BONUS
+        gb.display.setColor(GREEN);
         gb.display.drawRect(x, y, w, h);
         break;
     }
@@ -747,6 +780,35 @@ void drawEnemiesBullet() {
       gb.display.drawPixel(x, y, PINK);
      }
   }
+}
+
+void drawScene() {
+  //sky
+  gb.display.setColor(WHITE);
+  gb.display.drawFastHLine(0,50+camera.spd.dy,WIDTH);
+  gb.display.setColor(LIGHTBLUE);
+  gb.display.drawFastHLine(0,49+camera.spd.dy,WIDTH);
+  gb.display.setColor(BLUE);
+  gb.display.drawFastHLine(0,48+camera.spd.dy,WIDTH);
+  gb.display.setColor(DARKBLUE);
+  gb.display.drawFastHLine(0,47+camera.spd.dy,WIDTH);
+  gb.display.setColor(DARKGRAY);
+  gb.display.drawFastHLine(0,46+camera.spd.dy,WIDTH);
+  //mountain back
+
+  //city
+
+  //plants
+
+  //ground
+  gb.display.setColor(BROWN);
+  gb.display.fillRect(0,ymin + player.rect.h,WIDTH,10);
+
+}
+
+void setupCamera(byte x, byte y) {    //  coord of the object
+  camera.spd.dx = XMap[x];
+  camera.spd.dy = YMap[y];
 }
 
 // FIN DES FONCTIONS##########################################################
