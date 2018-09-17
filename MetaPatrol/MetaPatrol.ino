@@ -356,19 +356,19 @@ void setLevel(byte lv, byte ne, byte no, float spd) {
 }
 
 void spawnEnemy(byte i) {
-  enemies[i].rect.y = 0 ;
+  enemies[i].rect.y = -10 ;
   enemies[i].type = random(1,3);
   switch (enemies[i].type) {
     case 1:
-      enemies[i].rect.x = 0 ;
+      enemies[i].rect.x = random(12,69) ;
       enemies[i].spd.dx = -random(1,3);
       break;
     case 2:
-      enemies[i].rect.x = 0 ;
+      enemies[i].rect.x = random(12,69) ;
       enemies[i].spd.dx = -random(2,4);
       break;
   }
-  enemies[i].spd.dy = 0;
+  enemies[i].spd.dy = 1;
 }
 
 void spawnObstacles(byte i) {
@@ -494,6 +494,7 @@ void moveEnemies() {
   for (byte i = 0; i < num_enemies; i++) {
     
     enemies[i].rect.x =  enemies[i].rect.x - enemies[i].spd.dx;
+    enemies[i].rect.y =  enemies[i].rect.y + enemies[i].spd.dy;
 
     if (
       (level > 2)
@@ -508,6 +509,10 @@ void moveEnemies() {
 
     if (enemies[i].rect.x < 1 || enemies[i].rect.x >= (WIDTH - enemies[i].rect.w)) {
       enemies[i].spd.dx = -enemies[i].spd.dx;
+    }
+
+    if (enemies[i].rect.y >= 10) {
+      enemies[i].spd.dy = 0;
     }
   }
 }
@@ -704,7 +709,7 @@ void drawPlayer() {
   byte w = player.rect.w;
   byte h = player.rect.h;
   gb.display.setColor(WHITE); 
-  gb.display.drawRect(x, y, w, h);
+  gb.display.fillRect(x, y, w, h);
 }
 
 void drawStars() {
@@ -744,16 +749,16 @@ void drawObstacles() {
     byte h = obstacles[i].rect.h;
     switch (obstacles[i].type) {
       case 1: //HOLE
-        gb.display.setColor(WHITE);
-        gb.display.drawRect(x, y, w, h);
+        gb.display.setColor(BLACK);
+        gb.display.fillRect(x, y+1, w, h);
         break;
       case 2: //ROCK
         gb.display.setColor(GRAY);
-        gb.display.drawRect(x, y, w, h);
+        gb.display.fillRect(x, y, w, h);
         break;
       case 3: //BONUS
         gb.display.setColor(GREEN);
-        gb.display.drawRect(x, y, w, h);
+        gb.display.fillRect(x, y, w, h);
         break;
     }
   }
